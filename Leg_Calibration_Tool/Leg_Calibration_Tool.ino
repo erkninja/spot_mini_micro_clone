@@ -1,3 +1,8 @@
+// If you enable the TINKERCAD define, you can use wokwi.com to test
+// your code before running it on your Arduino/Teensy. Some things 
+// obviously won't work like the servo controller or saving the EEPROM
+// between sessions, so this flag lets you hack around it and fake
+// some stuff. 
 //#define TINKERCAD
 
 #include <EEPROM.h>
@@ -8,46 +13,81 @@
 #include "NovaServos.h"
 
 int incomingByte = 0; // for incoming serial data
-int menu_option = 0;  //keeps track of which menu option is selected
-int leg_select = 0; //keeps track of the leg that is being calibrated 
-int joint_select = 0; //keeps track of the joint/motor to calibrate
+int menu_option = 0;  // keeps track of which menu option is selected
+int leg_select = 0; // keeps track of the leg that is being calibrated 
+int joint_select = 0; // keeps track of the joint/servo to calibrate
 
-//menu switch
-#define NONE = 0
+// menu switch
+// TODO: Make me one giant enum. We don't care about values on these,
+// just names so collisions aren't an issue. 
+#define NONE 0
 enum motor_config_state{HOME=1, MIN, MAX, DONE};
 enum menus{LEG_CAL=1, SWEEP, CAL_OUTPUT, EXCEL_OPTION};
 enum cal_menus{TEST_AGAIN=1, SAVE_VAL, EXIT_NO_SAVE};
 
-//other global variables
-#define SPD = 5;
+// other global variables
+#define SPD 5
 #ifndef TINKERCAD
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 #endif
+int servoCalFlags = 0;
 
-//function prototypes
-int motor_cal(int menu_option, int prev_motor_pwm);
+// function prototypes
+int  motor_cal(int menu_option, int prev_motor_pwm);
+int  getNume(void);
+void saveToEEPROM(int address, int offset, float value);
+bool getServoCal(int leg, int joint);
+void setServoCal(int leg, int joint, bool calibrated);
+int  getServo(int leg, int joint);
+void setServo(int leg, int joint, int pos);
+void sweepServo(int leg, int joint, int pos);
 
-void setup() {
+// EEPROM Address
+// Pick an EEPROM address high enough that it probably won't be in use. 
+// You can change this freely, but make sure you have enough room to fit
+// both arrays. 
+// servoHome can store 16 servo values maximum
+// servoLimit can store 16x2 servo values maximum
+// The flag variable is used to limit writes to the EEPROM and to give us 
+// hints about what servo values have already been calibrated. 
+// Sneak the flag in right below our arrays. 
+#define eeAddress_home 100
+#define eeAddress_limit eeAddress_home + 16*sizeof(float)
+// TODO: Make sure we use our calibration flag
+// TODO: flag might need to be a byte[3] array so we can pick out home/min/max
+#define eeAddress_flag eeAddress_home - 16
+
+
+void
+setup(void)
+{
+  Serial.begin(19200); // opens serial port, sets data rate to a few bps
+
+  // Fetch both our arrays and our flags out of EEPROM. 
+  EEPROM.get(eeAddress_flag, servoCalFlags);
+  EEPROM.get(eeAddress_home, servoHome);
+  EEPROM.get(eeAddress_limit, servoLimit);
 #ifdef TINKERCAD
-// Set some test data in our servo arrays variables
-float myServoHome[TOTAL_SERVOS] = {         //home pos
-  368, 301, 435,                          //RFx
-  355, 422, 355,                          //LFx
-  348, 344, 396,                          //RRx
-  364, 341, 306,                          //LRx
+// Set some test data in our servo arrays variables. 
+// Wokwi.com doesn't save EEPROM between test runs. 
+float myServoHome[TOTAL_SERVOS] = {
+  368, 301, 435,
+  355, 422, 355,
+  348, 344, 396,
+  364, 341, 306,
 };
 memcpy(servoHome, myServoHome, sizeof(servoHome));
 
-float myServoLimit[TOTAL_SERVOS][2] = {     //min, max
-  {330, 450}, {226, 466}, {322, 548},     //RFx•
-  {0, 0}, {0, 0}, {0, 0},     //LFx
-  {0, 0}, {0, 0}, {0, 0},     //RRx
-  {0, 0}, {0, 0}, {0, 0},     //LRx
+float myServoLimit[TOTAL_SERVOS][2] = {
+  {330, 450}, {226, 466}, {322, 548},
+  {0, 0}, {0, 0}, {0, 0},
+  {0, 0}, {0, 0}, {0, 0},
+  {0, 0}, {0, 0}, {0, 0},
 };
 memcpy(servoLimit, myServoLimit, sizeof(servoLimit));
 #endif
 
-  Serial.begin(19200); // opens serial port, sets data rate to 9600 bps
+  // Woof woof beep boop. 
   Serial.println("*********************************");
   Serial.println("* Nova SM3 Leg Calibration Tool *");
   Serial.println("*       ^..^      /             *");
@@ -58,27 +98,29 @@ memcpy(servoLimit, myServoLimit, sizeof(servoLimit));
   Serial.println("\n");
 
 #ifndef TINKERCAD
+  // We don't have simulated servo controllers. 
   pwm.begin();
   pwm.setOscillatorFrequency(25000000); // 25_000_000
   pwm.setPWMFreq(60);
 #endif
 }
 
-void loop() {
-  char my_joint = 0; // joint iteration/selection temp variable
+void
+loop(void)
+{
+  byte my_joint = 0; // joint iteration/selection temp variable
 
   //Top menu
   MENU_START:
   Serial.println("-------------------------------------");
   Serial.println("1. Single Motor Calibration");
-  //TODO Need to implement Leg Sweep
   Serial.println("2. Leg Sweep");
   Serial.println("3. Print Calibration Values");
   Serial.println("4. Automatic Calibration Method");
   Serial.println("-------------------------------------");
   Serial.println("Selection Option: ");
 
-  while( 0 == (menu_option = Serial.parseInt()) ){}
+  menu_option = getMenuNum();
   Serial.print("\n");
   Serial.print("\n");
 
@@ -95,7 +137,7 @@ void loop() {
       Serial.println(" [4]--Butt--[3]");
       Serial.println("-------------------------------------");
       Serial.println("Select Leg (1-4): ");
-      while( 0 == (leg_select = Serial.parseInt()) ){}
+      leg_select = getMenuNum();
       Serial.print("\n");
       Serial.print("\n");
 
@@ -117,7 +159,7 @@ void loop() {
       Serial.println("       U");
       Serial.println("-------------------------------------");
       Serial.println("Select Motor (1-3): ");
-      while( 0 == (joint_select = Serial.parseInt()) ){}
+      joint_select = getMenuNum();
       Serial.print("\n");
       Serial.print("\n");
 
@@ -143,22 +185,30 @@ void loop() {
       Serial.println("2. Minimum Movement");
       Serial.println("3. Maximum Movement");
       Serial.println("4. Done");
-      while( 0 == (menu_option = Serial.parseInt()) ){}
+      menu_option = getMenuNum();
       Serial.print("\n");
       Serial.print("\n");
 
+      // The Home array is 1D so we can index directly in to the EEPROM location
+      // with just my_joint. The Limits array is 2D however so we need to 
+      // multiply by 2 and then add 0 or 1 to get to the right min/max
+      // position offset in memory. 
+      my_joint = servoLeg[leg_select-1][joint_select-1];
       switch (menu_option){
       case HOME:
-        my_joint = servoLeg[leg_select-1][joint_select-1];
         servoHome[my_joint] = motor_cal(menu_option, servoHome[my_joint]);
+        saveToEEPROM(eeAddress_home, my_joint, servoHome[my_joint]);
+        setServoCal(leg_select, joint_select, true);
         break;
       case MIN:
-        my_joint = servoLeg[leg_select-1][joint_select-1];
         servoLimit[my_joint][0] = motor_cal(menu_option, servoLimit[my_joint][0]);
+        saveToEEPROM(eeAddress_limit, my_joint*2+0, servoLimit[my_joint][0]);
+        setServoCal(leg_select, joint_select, true);
         break;
       case MAX:
-        my_joint = servoLeg[leg_select-1][joint_select-1];
         servoLimit[my_joint][1] = motor_cal(menu_option, servoLimit[my_joint][1]);
+        saveToEEPROM(eeAddress_limit, my_joint*2+1, servoLimit[my_joint][1]);
+        setServoCal(leg_select, joint_select, true);
         break;
       case DONE:
         return;
@@ -173,13 +223,41 @@ void loop() {
 
     //Sweep Menu
     case SWEEP:
+      // Sweep each joint on a leg one at a time. 
+      // A sweep is a home->min->max->home. 
       Serial.println("Sweep Menu");
-      // TODO
+      // TODO: Draw a leg select menu
+      leg_select = getMenuNum();
+
+      // Check that all motors are calibrated before we start. 
+      for(int j=1; j<4; j++) {
+        if(getServoCal(leg_select, j)) {
+          Serial.print("Leg #");Serial.print(leg_select);
+          Serial.print(" Joint #");Serial.print(j);
+          Serial.print(" is not calibrated. Bailing out!\n\n");
+          return;
+        }
+      }
+
+#ifdef TINKERCAD
+      for(int j=1; j<4; j++) {
+        my_joint = servoLeg[i_leg][i_joint];
+        sweepServo(leg_select, j, servoHome[my_joint]);
+        sweepServo(leg_select, j, servoLimit[my_joint][0]);
+        sweepServo(leg_select, j, servoLimit[my_joint][1]);
+        sweepServo(leg_select, j, servoHome[my_joint]);
+      }
+#endif
       break;  //break for case 2
 
     //Calibration Print Out
     case CAL_OUTPUT:
       Serial.println("Calibration Values For Code");
+#ifdef TINKERCAD
+      // Fetch our arrays from EEPROM to ensure it works. 
+      EEPROM.get(eeAddress_home, servoHome);
+      EEPROM.get(eeAddress_limit, servoLimit);
+#endif
 
       Serial.println("float servoHome[TOTAL_SERVOS] = {");
       for(int i_leg=0; i_leg<TOTAL_LEGS; i_leg++) {
@@ -193,9 +271,9 @@ void loop() {
       Serial.println("};");
 
       Serial.println("float servoLimit[TOTAL_SERVOS] = {");
-      for(char i_leg=0; i_leg<TOTAL_LEGS; i_leg++) {
+      for(byte i_leg=0; i_leg<TOTAL_LEGS; i_leg++) {
         Serial.print("  ");
-        for(char i_joint=0; i_joint<3; i_joint++) {
+        for(byte i_joint=0; i_joint<3; i_joint++) {
           Serial.print("{");
           my_joint = servoLeg[i_leg][i_joint];
           Serial.print(servoLimit[my_joint][0], 0);Serial.print(", ");
@@ -225,11 +303,11 @@ void loop() {
       Serial.println("2. Yes");
       Serial.println("-------------------------------------");
       Serial.println("Select Option: ");
-      while( 0 == (menu_option = Serial.parseInt()) ){}
+      menu_option = getMenuNum();
       if(menu_option != 2) { goto MENU_START; }
 
       Serial.println("Which leg is configured?: ");
-      while( 0 == (calibrated_leg = Serial.parseInt()) ){}
+      calibrated_leg = getMenuNum();
 
       // Calculating the variables for each servo of the calibrated leg
       int my_side, other_side;
@@ -295,9 +373,11 @@ void loop() {
 
 
 
+// TODO: We probably don't need to pass in a prev_motor_pwm anymore. 
+// We can just restore from flash if we don't like our setting. 
+// Check if we're calibrated first before restoring. 
 int motor_cal(int menu_option, int prev_motor_pwm) {
-    int motor_pwm = 0;
-    int motor_location = 0;
+    int servoPosition = 0;
 
     PWM_START:
     Serial.println("-------------------------------------");
@@ -321,22 +401,14 @@ int motor_cal(int menu_option, int prev_motor_pwm) {
     Serial.println("-------------------------------------");
 
     Serial.println(" PWM value: ");
-    while( 0 == (motor_pwm = Serial.parseInt()) ){}   //Wait for user input for motor pwm
+    servoPosition = getMenuNum();
     Serial.print("\n");
     Serial.print("\n");
 
     //DO MOTOR STUFF
     // Sweep each motor from it's current PWM position to it's new one
-    // Compare our current location with our desired location and 
-    // determine if we need to increase or decrease to reach it. 
 #ifndef TINKERCAD
-    motor_location = pwm.getPWM(servoSetup[leg_select-1][joint_select-1]);
-    for(int i = motor_location; 
-        i != motor_pwm; 
-        (motor_location<motor_pwm) ? i++ : i--) {
-      pwm.setPWM(servoSetup[leg_select-1][joint_select-1], 0, motor_pwm);
-      delay(SPD);
-    }
+    sweepServo(leg_select, joint_select, servoPosition);
 #endif
 
     PWM_OOPS:
@@ -347,7 +419,7 @@ int motor_cal(int menu_option, int prev_motor_pwm) {
     Serial.println("-------------------------------------");
     Serial.println("Select Option: ");
 
-    while( 0 == (menu_option = Serial.parseInt()) ){}
+    menu_option = getMenuNum();
 
     switch (menu_option){
     case TEST_AGAIN:
@@ -355,7 +427,7 @@ int motor_cal(int menu_option, int prev_motor_pwm) {
       break;
 
     case SAVE_VAL:
-      return motor_pwm;
+      return servoPosition;
       break;
 
     case EXIT_NO_SAVE:
@@ -367,5 +439,80 @@ int motor_cal(int menu_option, int prev_motor_pwm) {
       Serial.print("\n");
       goto PWM_OOPS;
       break;
+  }
+}
+
+
+// 
+// Helper functions
+
+// Spin on zero until the user enters a valid integer via serial. 
+// You can not fetch zero as a menu option as timeouts return zero. 
+// Both positive and negative integers are available. 
+int
+getMenuNum(void)
+{
+  int menuNum;
+  while( 0 == (menuNum = Serial.parseInt()) ){}
+  return menuNum;
+}
+
+// Wrap EEPROM.put to shove a float-sized value in to an address plus offset. 
+// Offset is also counted as a float size. 
+void
+saveToEEPROM(int address, int offset, float value)
+{
+        EEPROM.put(address + offset*sizeof(float), value);
+}
+
+// Use bitwise math to check if a single bit of our servo flags has been set. 
+// This takes 1-based leg and joint values. 
+bool
+getServoCal(int leg, int joint)
+{
+  int my_joint = servoLeg[leg-1][joint-1];
+  return servoCalFlags & (1 << my_joint);
+}
+
+// Use bitwise math to set a single bit in our servo flags. 
+// This takes 1-based leg and joint values. 
+void
+setServoCal(int leg, int joint, bool calibrated)
+{
+  int my_joint = servoLeg[leg-1][joint-1];
+  servoCalFlags |= (1 << my_joint);
+  EEPROM.put(eeAddress_flag, servoCalFlags);
+}
+
+// Servo helper functions. These take in the 1-based leg and joint values. 
+// servoSetup is the array holding the pin names to control this servo. 
+int
+getServo(int leg, int joint)
+{
+  return pwm.getPWM(servoSetup[leg-1][joint-1]);
+}
+
+// setServo() should not be used directly as this will snap instantly to 
+// the value and likely damage your leg. You should modify sweepServo 
+// or create your own sweep function to prevent torque-related damage. 
+void
+setServo(int leg, int joint, int pos)
+{
+  pwm.setPWM(servoSetup[leg-1][joint-1], 0, pos);
+}
+
+// Sweep the servo from where we are to where we want to be. 
+// Compare our current location with our desired location and 
+// determine if we need to increase or decrease to reach it. 
+// Delaying by SPD makes this very slow for long distances. 
+// SPD defaults to 5ms which is about half a second for 100 values. 
+// This is good for calibration but slow for normal movement. 
+void
+sweepServo(int leg, int joint, int pos)
+{
+  int curPos = getServo(leg, joint);
+  for(int i = curPos; i != pos; (curPos<pos) ? i++ : i--) {
+    setServo(leg, joint, pos);
+    delay(SPD);
   }
 }
