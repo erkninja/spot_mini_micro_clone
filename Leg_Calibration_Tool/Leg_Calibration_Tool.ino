@@ -18,8 +18,7 @@ int leg_select = 0; // keeps track of the leg that is being calibrated
 int joint_select = 0; // keeps track of the joint/servo to calibrate
 
 // menu switch
-// TODO: Make me one giant enum. We don't care about values on these,
-// just names so collisions aren't an issue. 
+// Each enum starts at 1 instead of 0 to align with the menu options
 #define NONE 0
 enum motor_config_state{HOME=1, MIN, MAX, DONE};
 enum menus{LEG_CAL=1, SWEEP, CAL_OUTPUT, EXCEL_OPTION};
@@ -30,17 +29,18 @@ enum cal_menus{TEST_AGAIN=1, SAVE_VAL, EXIT_NO_SAVE};
 #ifndef TINKERCAD
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 #endif
-int servoCalFlags = 0;
+int servoCalFlags[3];
 
 // function prototypes
 int  motor_cal(int menu_option, int prev_motor_pwm);
 int  getNume(void);
 void saveToEEPROM(int address, int offset, float value);
 bool getServoCal(int leg, int joint);
-void setServoCal(int leg, int joint, bool calibrated);
-int  getServo(int leg, int joint);
+void setServoCal(int leg, int joint, int calPos, bool calibrated);
+int  getServo(int leg, int joint, int calPos);
 void setServo(int leg, int joint, int pos);
 void sweepServo(int leg, int joint, int pos);
+int  legSweep(int leg);
 
 // EEPROM Address
 // Pick an EEPROM address high enough that it probably won't be in use. 
@@ -52,10 +52,9 @@ void sweepServo(int leg, int joint, int pos);
 // hints about what servo values have already been calibrated. 
 // Sneak the flag in right below our arrays. 
 #define eeAddress_home 100
-#define eeAddress_limit eeAddress_home + 16*sizeof(float)
+#define eeAddress_limit eeAddress_home + sizeof(servoHome)
 // TODO: Make sure we use our calibration flag
-// TODO: flag might need to be a byte[3] array so we can pick out home/min/max
-#define eeAddress_flag eeAddress_home - 16
+#define eeAddress_flag eeAddress_home - sizeof(servoCalFlags)
 
 
 void
@@ -88,13 +87,13 @@ memcpy(servoLimit, myServoLimit, sizeof(servoLimit));
 #endif
 
   // Woof woof beep boop. 
-  Serial.println("*********************************");
-  Serial.println("* Nova SM3 Leg Calibration Tool *");
-  Serial.println("*       ^..^      /             *");
-  Serial.println("*       /_/\\_____/              *");
-  Serial.println("*          /\\   /\\              *");
-  Serial.println("*         /  \\ /  \\             *");
-  Serial.println("*********************************");
+  Serial.println("*************************************");
+  Serial.println("* Leg Calibration Tool For Nova SM3 *");
+  Serial.println("*           ^..^      /             *");
+  Serial.println("*          /_/\\_____/               *");
+  Serial.println("*             /\\   /\\               *");
+  Serial.println("*            /  \\ /  \\              *");
+  Serial.println("*************************************");
   Serial.println("\n");
 
 #ifndef TINKERCAD
@@ -198,17 +197,17 @@ loop(void)
       case HOME:
         servoHome[my_joint] = motor_cal(menu_option, servoHome[my_joint]);
         saveToEEPROM(eeAddress_home, my_joint, servoHome[my_joint]);
-        setServoCal(leg_select, joint_select, true);
+        setServoCal(leg_select, joint_select, HOME, true);
         break;
       case MIN:
         servoLimit[my_joint][0] = motor_cal(menu_option, servoLimit[my_joint][0]);
         saveToEEPROM(eeAddress_limit, my_joint*2+0, servoLimit[my_joint][0]);
-        setServoCal(leg_select, joint_select, true);
+        setServoCal(leg_select, joint_select, MIN, true);
         break;
       case MAX:
         servoLimit[my_joint][1] = motor_cal(menu_option, servoLimit[my_joint][1]);
         saveToEEPROM(eeAddress_limit, my_joint*2+1, servoLimit[my_joint][1]);
-        setServoCal(leg_select, joint_select, true);
+        setServoCal(leg_select, joint_select, MAX, true);
         break;
       case DONE:
         return;
@@ -219,36 +218,47 @@ loop(void)
         goto CAL_TYPE;
         break;
       }
-      break;  //Break for case 1
+      break;  //Break for HOME (case 1)
 
     //Sweep Menu
     case SWEEP:
       // Sweep each joint on a leg one at a time. 
       // A sweep is a home->min->max->home. 
-      Serial.println("Sweep Menu");
-      // TODO: Draw a leg select menu
-      leg_select = getMenuNum();
+      SWEEP:
+        Serial.println("Sweep Menu");
+        Serial.println("-------------------------------------");
+        Serial.println("Left       Right");
+        Serial.println(" [2]--Head--[1]");
+        Serial.println("    |     |   ");
+        Serial.println("    |     |   ");
+        Serial.println(" [4]--Butt--[3]");
+        Serial.print("\n");
+        Serial.println("5.  All legs");
+        Serial.println("-------------------------------------");
+        Serial.println("Select Leg (1-4) or All legs (5): ");
 
-      // Check that all motors are calibrated before we start. 
-      for(int j=1; j<4; j++) {
-        if(getServoCal(leg_select, j)) {
-          Serial.print("Leg #");Serial.print(leg_select);
-          Serial.print(" Joint #");Serial.print(j);
-          Serial.print(" is not calibrated. Bailing out!\n\n");
-          return;
+        leg_select = getMenuNum();
+
+        if(leg_select < 0 || leg_select > TOTAL_LEGS || leg_select != 5){
+          Serial.println("**************");
+          Serial.println("Invalid input");
+          Serial.println("**************");
+          Serial.print("\n");
+          goto SWEEP;
         }
-      }
+        // Sweep all 3 motors on 1 leg
+        if (leg_select < 5 && leg_select > 0){
+          legSweep(leg_select);
+        }
 
-#ifdef TINKERCAD
-      for(int j=1; j<4; j++) {
-        my_joint = servoLeg[i_leg][i_joint];
-        sweepServo(leg_select, j, servoHome[my_joint]);
-        sweepServo(leg_select, j, servoLimit[my_joint][0]);
-        sweepServo(leg_select, j, servoLimit[my_joint][1]);
-        sweepServo(leg_select, j, servoHome[my_joint]);
-      }
-#endif
-      break;  //break for case 2
+        // Sweep all 3 motors on all legs
+        if (leg_select == 5){
+          for(int leg = 1; leg < 5; leg++){
+            legSweep(leg);
+          }
+        }
+
+      break;  //break for SWEEP (case 2)
 
     //Calibration Print Out
     case CAL_OUTPUT:
@@ -283,7 +293,7 @@ loop(void)
       }
       Serial.println("};");
       Serial.print("\n");
-      break;  //break for case 3
+      break;  //break for CAL_OUTPUT (case 3)
 
     case EXCEL_OPTION:
       int calibrated_leg;
@@ -431,7 +441,16 @@ int motor_cal(int menu_option, int prev_motor_pwm) {
       break;
 
     case EXIT_NO_SAVE:
-      return prev_motor_pwm;
+      my_joint = servoLeg[leg_select-1][joint_select-1];
+      if (menu_option == HOME){
+        return getFromEEPROM(eeAddress_home, my_joint);
+      } else {
+        // my_joint*2 travels to the correct joint number inside servoLimit
+        // menu_option-MIN uses the enum to create a 0/1 value to offset
+        // to the correct MIN/MAX position inside servoLimit
+        return getFromEEPROM(eeAddress_limit, my_joint*2+(menu_option-MIN));
+      }
+
       break;
 
    default:
@@ -462,26 +481,33 @@ getMenuNum(void)
 void
 saveToEEPROM(int address, int offset, float value)
 {
-        EEPROM.put(address + offset*sizeof(float), value);
+  EEPROM.put(address + offset*sizeof(float), value);
+}
+
+// Wrap EEPROM.get to not deal with all the sizeof math everywhere. 
+void
+getFromEEPROM(int address, int offset)
+{
+  EEPROM.get(address + offset*sizeof(float));
 }
 
 // Use bitwise math to check if a single bit of our servo flags has been set. 
 // This takes 1-based leg and joint values. 
 bool
-getServoCal(int leg, int joint)
+getServoCal(int leg, int joint, int calPos)
 {
   int my_joint = servoLeg[leg-1][joint-1];
-  return servoCalFlags & (1 << my_joint);
+  return servoCalFlags[calPos-1] & (1 << my_joint);
 }
 
 // Use bitwise math to set a single bit in our servo flags. 
 // This takes 1-based leg and joint values. 
 void
-setServoCal(int leg, int joint, bool calibrated)
+setServoCal(int leg, int joint, int calPos, bool calibrated)
 {
   int my_joint = servoLeg[leg-1][joint-1];
-  servoCalFlags |= (1 << my_joint);
-  EEPROM.put(eeAddress_flag, servoCalFlags);
+  servoCalFlags[calPos-1] |= (1 << my_joint);
+  EEPROM.put(eeAddress_flag + (calPos-1)*sizeof(int), servoCalFlags[calPos-1]);
 }
 
 // Servo helper functions. These take in the 1-based leg and joint values. 
@@ -515,4 +541,32 @@ sweepServo(int leg, int joint, int pos)
     setServo(leg, joint, pos);
     delay(SPD);
   }
+}
+
+// Check that all servos on one leg are calibrated before we start. 
+// Check every position (HOME/MIN/MAX) for each joint
+int
+legSweep(int leg)
+{
+  for(int j=1; j<4; j++) {
+    for(int p=1; p<4; p++) {
+      if(getServoCal(leg, j)) {
+        Serial.print("Leg #");Serial.print(leg);
+        Serial.print(" Joint #");Serial.print(j);
+        Serial.print(" is not calibrated. Bailing out!\n\n");
+        return;
+      }
+    }
+  }
+
+#ifdef TINKERCAD
+  // Sweep leg from Home > Min > Max > Home
+  for(int j=1; j<4; j++) {
+    my_joint = servoLeg[leg][j];
+    sweepServo(leg, j, servoHome[j]);
+    sweepServo(leg, j, servoLimit[j[0]);
+    sweepServo(leg, j, servoLimit[j[1]);
+    sweepServo(leg, j, servoHome[j]);
+  }
+#endif
 }
