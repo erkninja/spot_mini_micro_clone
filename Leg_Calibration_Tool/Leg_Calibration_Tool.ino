@@ -32,7 +32,7 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 int servoCalFlags[3];
 
 // function prototypes
-int  motor_cal(int menu_option, int prev_motor_pwm);
+int  motor_cal(int menu_option);
 int  getNume(void);
 void saveToEEPROM(int address, int offset, float value);
 bool getServoCal(int leg, int joint);
@@ -195,17 +195,17 @@ loop(void)
       my_joint = servoLeg[leg_select-1][joint_select-1];
       switch (menu_option){
       case HOME:
-        servoHome[my_joint] = motor_cal(menu_option, servoHome[my_joint]);
+        servoHome[my_joint] = motor_cal(menu_option);
         saveToEEPROM(eeAddress_home, my_joint, servoHome[my_joint]);
         setServoCal(leg_select, joint_select, HOME, true);
         break;
       case MIN:
-        servoLimit[my_joint][0] = motor_cal(menu_option, servoLimit[my_joint][0]);
+        servoLimit[my_joint][0] = motor_cal(menu_option);
         saveToEEPROM(eeAddress_limit, my_joint*2+0, servoLimit[my_joint][0]);
         setServoCal(leg_select, joint_select, MIN, true);
         break;
       case MAX:
-        servoLimit[my_joint][1] = motor_cal(menu_option, servoLimit[my_joint][1]);
+        servoLimit[my_joint][1] = motor_cal(menu_option);
         saveToEEPROM(eeAddress_limit, my_joint*2+1, servoLimit[my_joint][1]);
         setServoCal(leg_select, joint_select, MAX, true);
         break;
@@ -386,7 +386,9 @@ loop(void)
 // TODO: We probably don't need to pass in a prev_motor_pwm anymore. 
 // We can just restore from flash if we don't like our setting. 
 // Check if we're calibrated first before restoring. 
-int motor_cal(int menu_option, int prev_motor_pwm) {
+int
+motor_cal(int menu_option)
+{
     int servoPosition = 0;
 
     PWM_START:
@@ -433,6 +435,9 @@ int motor_cal(int menu_option, int prev_motor_pwm) {
 
     switch (menu_option){
     case TEST_AGAIN:
+      Serial.println"------------------------------------");
+      Serial.print("Previous PWM Value: ");
+      Serial.println(servoPosition);
       goto PWM_START;
       break;
 
