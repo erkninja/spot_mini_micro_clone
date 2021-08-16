@@ -61,7 +61,9 @@ void
 setup(void)
 {
   Serial.begin(19200); // opens serial port, sets data rate to a few bps
-
+  while (!Serial) {
+    // Wait for Arduino Serial Monitor to be ready
+  }
   // Fetch both our arrays and our flags out of EEPROM. 
   EEPROM.get(eeAddress_flag, servoCalFlags);
   EEPROM.get(eeAddress_home, servoHome);
@@ -117,7 +119,7 @@ loop(void)
   Serial.println("3. Print Calibration Values");
   Serial.println("4. Automatic Calibration Method");
   Serial.println("-------------------------------------");
-  Serial.println("Selection Option: ");
+  Serial.print("Selection Option: ");
 
   menu_option = getMenuNum();
   Serial.print("\n");
@@ -135,7 +137,7 @@ loop(void)
       Serial.println("    |     |   ");
       Serial.println(" [4]--Butt--[3]");
       Serial.println("-------------------------------------");
-      Serial.println("Select Leg (1-4): ");
+      Serial.print("Select Leg (1-4): ");
       leg_select = getMenuNum();
       Serial.print("\n");
       Serial.print("\n");
@@ -157,7 +159,7 @@ loop(void)
       Serial.println("       |");
       Serial.println("       U");
       Serial.println("-------------------------------------");
-      Serial.println("Select Motor (1-3): ");
+      Serial.print("Select Motor (1-3): ");
       joint_select = getMenuNum();
       Serial.print("\n");
       Serial.print("\n");
@@ -184,6 +186,9 @@ loop(void)
       Serial.println("2. Minimum Movement");
       Serial.println("3. Maximum Movement");
       Serial.println("4. Done");
+      Serial.println("-------------------------------------");
+      Serial.print("Selection Option: ");
+
       menu_option = getMenuNum();
       Serial.print("\n");
       Serial.print("\n");
@@ -235,7 +240,7 @@ loop(void)
         Serial.print("\n");
         Serial.println("5.  All legs");
         Serial.println("-------------------------------------");
-        Serial.println("Select Leg (1-4) or All legs (5): ");
+        Serial.print("Select Leg (1-4) or All legs (5): ");
 
         leg_select = getMenuNum();
 
@@ -312,7 +317,7 @@ loop(void)
       Serial.println("1. No");
       Serial.println("2. Yes");
       Serial.println("-------------------------------------");
-      Serial.println("Select Option: ");
+      Serial.print("Select Option: ");
       menu_option = getMenuNum();
       if(menu_option != 2) { goto MENU_START; }
 
@@ -399,6 +404,8 @@ motor_cal(int menu_option)
     Serial.print("Joint: ");
     Serial.print(joint_select, DEC);
     Serial.print("\n");
+    Serial.println("-------------------------------------");
+    
     switch(menu_option){
     case HOME:
       Serial.print("Home");
@@ -410,9 +417,8 @@ motor_cal(int menu_option)
       Serial.print("Max");
       break;
     }
-    Serial.println("-------------------------------------");
-
-    Serial.println(" PWM value: ");
+    
+    Serial.print(" PWM value: ");
     servoPosition = getMenuNum();
     Serial.print("\n");
     Serial.print("\n");
@@ -429,13 +435,13 @@ motor_cal(int menu_option)
     Serial.println("2. Save Value");
     Serial.println("3. Exit without saving");
     Serial.println("-------------------------------------");
-    Serial.println("Select Option: ");
+    Serial.print("Select Option: ");
 
     menu_option = getMenuNum();
 
     switch (menu_option){
     case TEST_AGAIN:
-      Serial.println"------------------------------------");
+      Serial.println("------------------------------------");
       Serial.print("Previous PWM Value: ");
       Serial.println(servoPosition);
       goto PWM_START;
@@ -446,7 +452,7 @@ motor_cal(int menu_option)
       break;
 
     case EXIT_NO_SAVE:
-      my_joint = servoLeg[leg_select-1][joint_select-1];
+      int my_joint = servoLeg[leg_select-1][joint_select-1];
       if (menu_option == HOME){
         return getFromEEPROM(eeAddress_home, my_joint);
       } else {
@@ -478,6 +484,8 @@ getMenuNum(void)
 {
   int menuNum;
   while( 0 == (menuNum = Serial.parseInt()) ){}
+  Serial.print(menuNum);
+  Serial.print("\n");
   return menuNum;
 }
 
@@ -490,10 +498,12 @@ saveToEEPROM(int address, int offset, float value)
 }
 
 // Wrap EEPROM.get to not deal with all the sizeof math everywhere. 
-void
+float
 getFromEEPROM(int address, int offset)
 {
-  EEPROM.get(address + offset*sizeof(float));
+  float value;
+  EEPROM.get(address + offset*sizeof(float), value);
+  return value;
 }
 
 // Use bitwise math to check if a single bit of our servo flags has been set. 
@@ -529,7 +539,11 @@ getServo(int leg, int joint)
 void
 setServo(int leg, int joint, int pos)
 {
-  pwm.setPWM(servoSetup[leg-1][joint-1], 0, pos);
+  //pwm.setPWM(servoSetup[leg-1][joint-1], 0, pos);
+  // TODO: Fix servoSetup because it is not returning the right value.
+  int servoID = leg * joint;
+  //Serial.println(servoSetup[servoID-1][1]);
+  pwm.setPWM(servoSetup[servoID-1][1], 0, pos);
 }
 
 // Sweep the servo from where we are to where we want to be. 
