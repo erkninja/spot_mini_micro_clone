@@ -587,7 +587,7 @@ legSweep(int leg)
 {
   for(int j=1; j<4; j++) {
     for(int p=1; p<4; p++) {
-      if(getServoCal(leg, j, p)) {
+      if(!getServoCal(leg, j, p)) {
         Serial.print("Leg #");Serial.print(leg);
         Serial.print(" Joint #");Serial.print(j);
         Serial.print(" is not calibrated. Bailing out!\n\n");
