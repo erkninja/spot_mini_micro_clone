@@ -20,8 +20,8 @@ int joint_select = 0; // keeps track of the joint/servo to calibrate
 // menu switch
 // Each enum starts at 1 instead of 0 to align with the menu options
 #define NONE 0
+enum menus{LEG_CAL=1, SWEEP, CAL_OUTPUT, AUTO_CAL, RESET_CAL, LOAD_CAL};
 enum motor_config_state{HOME=1, MIN, MAX, DONE};
-enum menus{LEG_CAL=1, SWEEP, CAL_OUTPUT, EXCEL_OPTION};
 enum cal_menus{TEST_AGAIN=1, SAVE_VAL, EXIT_NO_SAVE};
 
 // other global variables
@@ -35,7 +35,7 @@ int servoCalFlags[3];
 int  motor_cal(int menu_option);
 int  getNume(void);
 void saveToEEPROM(int address, int offset, float value);
-bool getServoCal(int leg, int joint);
+bool getServoCal(int leg, int joint, int calPos);
 void setServoCal(int leg, int joint, int calPos, bool calibrated);
 int  getServo(int leg, int joint, int calPos);
 void setServo(int leg, int joint, int pos);
@@ -53,7 +53,6 @@ int  legSweep(int leg);
 // Sneak the flag in right below our arrays. 
 #define eeAddress_home 100
 #define eeAddress_limit eeAddress_home + sizeof(servoHome)
-// TODO: Make sure we use our calibration flag
 #define eeAddress_flag eeAddress_home - sizeof(servoCalFlags)
 
 
@@ -118,13 +117,14 @@ loop(void)
   Serial.println("2. Leg Sweep");
   Serial.println("3. Print Calibration Values");
   Serial.println("4. Automatic Calibration Method");
+  Serial.println("5. Reset Calibration Values");
+  Serial.println("6. Load Calibration Values from file");
   Serial.println("-------------------------------------");
   Serial.print("Selection Option: ");
 
   menu_option = getMenuNum();
   Serial.print("\n");
   Serial.print("\n");
-
 
   switch (menu_option) {
   case LEG_CAL:
@@ -243,8 +243,8 @@ loop(void)
         Serial.print("Select Leg (1-4) or All legs (5): ");
 
         leg_select = getMenuNum();
-
-        if(leg_select < 0 || leg_select > TOTAL_LEGS || leg_select != 5){
+        // TOTAL_LEGS + 1 allows for the menu option of sweeping all legs, which would be the next number after TOTAL_LEGS
+        if(leg_select < 0 || leg_select > TOTAL_LEGS + 1){
           Serial.println("**************");
           Serial.println("Invalid input");
           Serial.println("**************");
@@ -300,7 +300,7 @@ loop(void)
       Serial.print("\n");
       break;  //break for CAL_OUTPUT (case 3)
 
-    case EXCEL_OPTION:
+    case AUTO_CAL:
       int calibrated_leg;
 
       Serial.println("Automatic calibration tool:");
@@ -376,7 +376,25 @@ loop(void)
       Serial.println("-------------------------------------");
       Serial.print("\n\n");
 
-      break;
+      break;  // Break for AUTO_CAL
+
+    case RESET_CAL:
+      // Setting the arrays in RAM to 0
+      memset(servoHome,0,sizeof(servoHome));
+      memset(servoLimit,0,sizeof(servoLimit));
+      
+      // Setting the bits in the EEPROM of Calibration Flags to 0
+      for(int i=1; i<5; i++){
+        for(int j=1; j<4; j++){
+          setServoCal(i, j, 0, false);
+        } 
+       }
+      
+      break;  // Break for RESET_CAL
+
+    case LOAD_CAL:
+      // TODO: Take array values (home, limit) from header file and save to EEPROM
+      break;  // Break for LOAD_CAL
 
     default:
       Serial.println("Invalid Option");
@@ -484,6 +502,9 @@ getMenuNum(void)
 {
   int menuNum;
   while( 0 == (menuNum = Serial.parseInt()) ){}
+  // Arduino IDE Serial Montior does not display the values that
+  // you type. If you're using a different Serial Monitor that
+  // displays the inputs, then remove the serial prints below.
   Serial.print(menuNum);
   Serial.print("\n");
   return menuNum;
@@ -516,7 +537,8 @@ getServoCal(int leg, int joint, int calPos)
 }
 
 // Use bitwise math to set a single bit in our servo flags. 
-// This takes 1-based leg and joint values. 
+// This takes 1-based leg and joint values.
+// TODO: flags are not being set correctly
 void
 setServoCal(int leg, int joint, int calPos, bool calibrated)
 {
@@ -539,11 +561,7 @@ getServo(int leg, int joint)
 void
 setServo(int leg, int joint, int pos)
 {
-  //pwm.setPWM(servoSetup[leg-1][joint-1], 0, pos);
-  // TODO: Fix servoSetup because it is not returning the right value.
-  int servoID = leg * joint;
-  //Serial.println(servoSetup[servoID-1][1]);
-  pwm.setPWM(servoSetup[servoID-1][1], 0, pos);
+  pwm.setPWM(servoSetup[(leg*joint)-1][1], 0, pos);
 }
 
 // Sweep the servo from where we are to where we want to be. 
@@ -569,11 +587,11 @@ legSweep(int leg)
 {
   for(int j=1; j<4; j++) {
     for(int p=1; p<4; p++) {
-      if(getServoCal(leg, j)) {
+      if(getServoCal(leg, j, p)) {
         Serial.print("Leg #");Serial.print(leg);
         Serial.print(" Joint #");Serial.print(j);
         Serial.print(" is not calibrated. Bailing out!\n\n");
-        return;
+        return 0;
       }
     }
   }
