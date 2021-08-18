@@ -267,12 +267,19 @@ loop(void)
 
     //Calibration Print Out
     case CAL_OUTPUT:
-      Serial.println("Calibration Values For Code");
+      //Serial.println("Calibration Values For Code");
 #ifdef TINKERCAD
       // Fetch our arrays from EEPROM to ensure it works. 
       EEPROM.get(eeAddress_home, servoHome);
       EEPROM.get(eeAddress_limit, servoLimit);
 #endif
+      Serial.println("-------------------------------------");
+      Serial.println("Calibration Values for Header File");
+      Serial.println("-------------------------------------");
+      Serial.print("\n");
+      Serial.println("Copy these calibration values into the header file");
+      Serial.print("\n\n");
+
 
       Serial.println("float servoHome[TOTAL_SERVOS] = {");
       for(int i_leg=0; i_leg<TOTAL_LEGS; i_leg++) {
@@ -284,6 +291,9 @@ loop(void)
         Serial.print("\n");
       }
       Serial.println("};");
+      
+      Serial.print("\n\n");
+
 
       Serial.println("float servoLimit[TOTAL_SERVOS] = {");
       for(byte i_leg=0; i_leg<TOTAL_LEGS; i_leg++) {
@@ -297,7 +307,40 @@ loop(void)
         Serial.print("\n");
       }
       Serial.println("};");
-      Serial.print("\n");
+      
+      Serial.print("\n\n");
+
+      // Outputs the calibration flags in groups of 3
+      // Starts with motor 1 and prints out a new line for each motor
+      // The columns are HOME, MIN, MAX
+      Serial.println("-------------------------------------");
+      Serial.println("       Calibration Flags ");
+      Serial.println("1 = Calibrated, 0 = Not Calibrated");
+      Serial.print("--------------------------------------");
+      for (int i_leg = 1; i_leg<TOTAL_LEGS+1; i_leg++) {
+        Serial.print("\n\nLeg ");
+        Serial.print(i_leg);
+        Serial.print("\n");
+        Serial.println("HOME  MIN   MAX");
+        for(int j_joint = 1; j_joint<4; j_joint++){
+          Serial.print("\n");
+          for(int pos = 1; pos < 4; pos++){
+            if (getServoCal(i_leg, j_joint, pos) == true){
+              Serial.print(" 1    ");
+            }
+              else {
+                Serial.print(" 0    ");
+                }
+            
+          }
+        }
+        
+        
+      }
+
+      Serial.print("\n\n");
+
+      
       break;  //break for CAL_OUTPUT (case 3)
 
     case AUTO_CAL:
@@ -386,7 +429,10 @@ loop(void)
       // Setting the bits in the EEPROM of Calibration Flags to 0
       for(int i=1; i<5; i++){
         for(int j=1; j<4; j++){
-          setServoCal(i, j, 0, false);
+          for(int pos=1; pos<4; pos++){
+            setServoCal(i, j, pos, false);
+          }
+          
         } 
        }
       
@@ -538,12 +584,20 @@ getServoCal(int leg, int joint, int calPos)
 
 // Use bitwise math to set a single bit in our servo flags. 
 // This takes 1-based leg and joint values.
-// TODO: flags are not being set correctly
+// calPos is HOME, MIN, or MAX, which have values of 1, 2, 3 respectively
+// calibrated is being passed telling setServoCal whether or not the flag should be set
+// true = calibrated, false = uncalibrated
 void
 setServoCal(int leg, int joint, int calPos, bool calibrated)
 {
   int my_joint = servoLeg[leg-1][joint-1];
-  servoCalFlags[calPos-1] |= (1 << my_joint);
+  if (calibrated == true){
+    servoCalFlags[calPos-1] |= (1 << my_joint);
+
+  }
+  else {
+    servoCalFlags[calPos-1] &= (0 << my_joint);
+  }
   EEPROM.put(eeAddress_flag + (calPos-1)*sizeof(int), servoCalFlags[calPos-1]);
 }
 
@@ -596,13 +650,13 @@ legSweep(int leg)
     }
   }
 
-#ifdef TINKERCAD
+#ifndef TINKERCAD
   // Sweep leg from Home > Min > Max > Home
   for(int j=1; j<4; j++) {
-    my_joint = servoLeg[leg][j];
+    //my_joint = servoLeg[leg][j];
     sweepServo(leg, j, servoHome[j]);
-    sweepServo(leg, j, servoLimit[j[0]);
-    sweepServo(leg, j, servoLimit[j[1]);
+    sweepServo(leg, j, servoLimit[j][0]);
+    sweepServo(leg, j, servoLimit[j][1]);
     sweepServo(leg, j, servoHome[j]);
   }
 #endif
