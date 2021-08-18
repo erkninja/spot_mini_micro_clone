@@ -16,11 +16,13 @@ int incomingByte = 0; // for incoming serial data
 int menu_option = 0;  // keeps track of which menu option is selected
 int leg_select = 0; // keeps track of the leg that is being calibrated 
 int joint_select = 0; // keeps track of the joint/servo to calibrate
+float headerServoHome[TOTAL_SERVOS];
+float headerServoLimit[TOTAL_SERVOS][2];
 
 // menu switch
 // Each enum starts at 1 instead of 0 to align with the menu options
 #define NONE 0
-enum menus{LEG_CAL=1, SWEEP, CAL_OUTPUT, AUTO_CAL, RESET_CAL, LOAD_CAL};
+enum menus{LEG_CAL=1, SWEEP, CAL_OUTPUT, AUTO_CAL, RESET_CAL, LOAD_CAL, SERVO_DISABLE};
 enum motor_config_state{HOME=1, MIN, MAX, DONE};
 enum cal_menus{TEST_AGAIN=1, SAVE_VAL, EXIT_NO_SAVE};
 
@@ -33,7 +35,7 @@ int servoCalFlags[3];
 
 // function prototypes
 int  motor_cal(int menu_option);
-int  getNume(void);
+int  getMenuNum(void);
 void saveToEEPROM(int address, int offset, float value);
 bool getServoCal(int leg, int joint, int calPos);
 void setServoCal(int leg, int joint, int calPos, bool calibrated);
@@ -41,6 +43,7 @@ int  getServo(int leg, int joint, int calPos);
 void setServo(int leg, int joint, int pos);
 void sweepServo(int leg, int joint, int pos);
 int  legSweep(int leg);
+int  areYouSure(void);
 
 // EEPROM Address
 // Pick an EEPROM address high enough that it probably won't be in use. 
@@ -63,6 +66,19 @@ setup(void)
   while (!Serial) {
     // Wait for Arduino Serial Monitor to be ready
   }
+  // Grabs the values from the header before they are overwritten by
+  // EEPROM values. These will be used if you want to manually add calibration
+  // values in the header file 
+  for( int i=0; i < TOTAL_SERVOS; i++){
+    headerServoHome[i] = servoHome[i];
+  }
+  for (int i=0; i < TOTAL_SERVOS; i++){
+    for (int j=0; j < 2; j++){
+      headerServoLimit[i][j] = servoLimit[i][j];
+    }
+  }
+  
+  
   // Fetch both our arrays and our flags out of EEPROM. 
   EEPROM.get(eeAddress_flag, servoCalFlags);
   EEPROM.get(eeAddress_home, servoHome);
@@ -119,6 +135,7 @@ loop(void)
   Serial.println("4. Automatic Calibration Method");
   Serial.println("5. Reset Calibration Values");
   Serial.println("6. Load Calibration Values from file");
+  Serial.println("7. Disable all Servos");
   Serial.println("-------------------------------------");
   Serial.print("Selection Option: ");
 
@@ -422,6 +439,33 @@ loop(void)
       break;  // Break for AUTO_CAL
 
     case RESET_CAL:
+        Serial.println("Are you sure you want to reset all cal values?");
+        Serial.println("-------------------------------------");
+        Serial.println("1. No");
+        Serial.println("2. Yes");
+        Serial.println("-------------------------------------");
+        Serial.print("Select Option: ");
+      
+        menu_option = getMenuNum();
+      
+        switch(menu_option){
+        
+        // No
+        case 1:
+          goto MENU_START;
+          break;
+        
+        // Yes
+        case 2:
+          break;
+
+        default:
+          Serial.println("Invalid Option");
+          Serial.print("\n");
+          goto MENU_START;
+          break;
+        }
+        
       // Setting the arrays in RAM to 0
       memset(servoHome,0,sizeof(servoHome));
       memset(servoLimit,0,sizeof(servoLimit));
@@ -439,9 +483,58 @@ loop(void)
       break;  // Break for RESET_CAL
 
     case LOAD_CAL:
-      // TODO: Take array values (home, limit) from header file and save to EEPROM
+      // TODO: Figure out what to do with cal flags...are they calibrated?
+      // What if they only bring in a few values and not all?
+      // Take the vaues from the header file (saved in setup function)
+      // and put the values into EEPROM
+      Serial.println("**********************************************************************");
+      Serial.println("WARNING: All cal flags will be set to Yes if calibration is");
+      Serial.println("imported from the header file. There will be no safety checks");
+      Serial.println("for running an uncalibrated servo after loading from the header.");
+      Serial.println("Ensure all HOME, MIN, and MAX values are filled in the header file.");
+      Serial.println("**********************************************************************");
+      Serial.print("\n");
+      Serial.println("Are you sure you want to load header file calibration values?");
+      Serial.println("-------------------------------------");
+      Serial.println("1. No");
+      Serial.println("2. Yes");
+      Serial.println("-------------------------------------");
+      Serial.print("Select Option: ");
+    
+      menu_option = getMenuNum();
+    
+      switch(menu_option){
+      
+      // No
+      case 1:
+        goto MENU_START;
+        break;
+      
+      // Yes
+      case 2:
+        break;
+
+      default:
+        Serial.println("Invalid Option");
+        Serial.print("\n");
+        goto MENU_START;
+        break;
+      }
+        
+      EEPROM.put(eeAddress_home, headerServoHome);
+      EEPROM.put(eeAddress_limit, headerServoLimit);
+      // Put new EEPROM data into the arrays
+      EEPROM.get(eeAddress_home, servoHome);
+      EEPROM.get(eeAddress_limit, servoLimit);
       break;  // Break for LOAD_CAL
 
+    // TODO: If possible, implement a way to disable the servos
+    case SERVO_DISABLE:
+      for(int i=0; i<16; i++){
+        pwm.setPin(i,0);    
+      }
+      break;  // Break for SERVO_DISABLE
+      
     default:
       Serial.println("Invalid Option");
       Serial.print("\n");
@@ -452,9 +545,6 @@ loop(void)
 
 
 
-// TODO: We probably don't need to pass in a prev_motor_pwm anymore. 
-// We can just restore from flash if we don't like our setting. 
-// Check if we're calibrated first before restoring. 
 int
 motor_cal(int menu_option)
 {
@@ -624,6 +714,7 @@ setServo(int leg, int joint, int pos)
 // Delaying by SPD makes this very slow for long distances. 
 // SPD defaults to 5ms which is about half a second for 100 values. 
 // This is good for calibration but slow for normal movement. 
+//TODO: Coax and Femur move on sweep, but tibia does not
 void
 sweepServo(int leg, int joint, int pos)
 {
