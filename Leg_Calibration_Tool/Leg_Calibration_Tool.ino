@@ -69,14 +69,9 @@ setup(void)
   // Grabs the values from the header before they are overwritten by
   // EEPROM values. These will be used if you want to manually add calibration
   // values in the header file 
-  for( int i=0; i < TOTAL_SERVOS; i++){
-    headerServoHome[i] = servoHome[i];
-  }
-  for (int i=0; i < TOTAL_SERVOS; i++){
-    for (int j=0; j < 2; j++){
-      headerServoLimit[i][j] = servoLimit[i][j];
-    }
-  }
+  memcpy(headerServoHome, servoHome, sizeof(servoHome));
+  memcpy(headerServoLimit, servoLimit, sizeof(servoLimit));
+
   
   
   // Fetch both our arrays and our flags out of EEPROM. 
@@ -528,11 +523,15 @@ loop(void)
       EEPROM.get(eeAddress_limit, servoLimit);
       break;  // Break for LOAD_CAL
 
+
+
     // TODO: If possible, implement a way to disable the servos
     case SERVO_DISABLE:
       for(int i=0; i<16; i++){
         pwm.setPin(i,0);    
       }
+      Serial.println("All Servos Disabled!");
+      Serial.print("\n");
       break;  // Break for SERVO_DISABLE
       
     default:
@@ -541,6 +540,8 @@ loop(void)
       goto MENU_START;
       break;
     } //end of switch
+
+    
 } //end main loop function
 
 
